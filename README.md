@@ -1,6 +1,6 @@
 # Sistema Multi-Agente ReAct para Auditoría de Inteligencia Financiera
 
-**Curso:** Arquitecturas de Modelos de Lenguaje (LLMs)
+**Curso:** Procesamiento del Lenguaje Natural (PLN)
 **Proyecto Final — Opción 2:** Sistema Operativo de Agentes Cognitivos para Inteligencia Competitiva
 
 ---
