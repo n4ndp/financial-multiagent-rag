@@ -44,19 +44,24 @@ orquestación de agentes sobre un modelo pre-entrenado.
 ## 3. Datos
 
 Se utiliza el dataset `virattt/financial-qa-10K` (Hugging Face), compuesto por preguntas y
-contextos extraídos de reportes 10-K de empresas reales. La base de conocimiento se construyó
-indexando 3000 documentos del dataset; el conjunto de evaluación se extrajo de una porción
-distinta, no incluida en el índice, para evitar fuga de información entre la construcción de la
-base vectorial y la evaluación del sistema.
+contextos extraídos de reportes 10-K de empresas reales (Amazon, GM, Kroger, Enphase Energy,
+entre otras). La base de conocimiento se construyó indexando 3000 documentos del dataset; el
+conjunto de evaluación se extrajo de una porción distinta, no incluida en el índice, para
+evitar fuga de información entre la construcción de la base vectorial y la evaluación.
 
 ### Selección del conjunto de evaluación
 
 El enunciado del proyecto exige evaluar el sistema sobre 50 consultas complejas. Como criterio
 objetivo de complejidad se utilizó la longitud de la pregunta en número de palabras: dentro del
 dataset, las preguntas más largas corresponden sistemáticamente a consultas que combinan varias
-condiciones (múltiples cargos ejecutivos, rangos de fechas, transiciones entre roles), lo cual
-exige mayor precisión de recuperación y de síntesis que una pregunta factual simple de una sola
-variable. Se seleccionaron las 50 preguntas de mayor longitud dentro del conjunto no indexado.
+condiciones (cifras específicas, rangos de fechas, cláusulas contables encadenadas), lo cual
+exige mayor precisión de recuperación y de síntesis que una pregunta factual simple. Se
+seleccionaron las 50 preguntas de mayor longitud dentro del conjunto no indexado, con un
+promedio de **28 palabras por pregunta**. Ejemplos representativos:
+
+- *"How much did the unrecognized tax benefits total as of March 31, 2023, and what impact would they have on the effective tax rate if realized?"*
+- *"What amount of dividends to GM were included in the net cash used in financing activities for GM Financial for the year ended December 31, 2023?"*
+- *"What was the noncash pre-tax impairment charge recorded due to the disposal of Vrio's operations in 2021, and what are the main components contributing to this amount?"*
 
 ## 4. Metodología de evaluación
 
@@ -77,43 +82,78 @@ escala de 0 a 100:
 
 | Métrica | Multi-Agente | Naive RAG | Diferencia |
 |---|---|---|---|
-| Faithfulness | _completar con `tabla_comparativa.csv`_ | _completar_ | _completar_ |
-| Answer Relevance | _completar_ | _completar_ | _completar_ |
+| Faithfulness | **75.7** | 68.7 | **+7.0** |
+| Answer Relevance | **82.6** | 79.4 | +3.2 |
 
-Reintentos promedio del Auditor por consulta: _completar_.
+**Comportamiento del ciclo de auditoría:**
+
+| Indicador | Valor |
+|---|---|
+| Reintentos promedio del Auditor por consulta | 1.42 |
+| Consultas con al menos un rechazo del Auditor | 14 de 50 (28 %) |
+| Consultas resueltas al primer intento | 36 de 50 (72 %) |
+| Consultas que requirieron 2 rechazos | 7 de 50 (14 %) |
+| Consultas que requirieron 3 rechazos (límite máximo) | 7 de 50 (14 %) |
 
 ## 6. Conclusiones
 
-_A completar con los valores obtenidos tras la ejecución del notebook (la Sección 15 del
-notebook contiene la misma estructura de conclusión con marcadores equivalentes):_
+El sistema multi-agente superó al Naive RAG en ambas métricas, con una diferencia más marcada
+en Faithfulness (+7.0 puntos) que en Answer Relevance (+3.2 puntos). Este patrón es consistente
+con el diseño del sistema: el Auditor está diseñado específicamente para detectar afirmaciones
+no respaldadas por el contexto, por lo que su efecto se concentra en la métrica que mide
+alucinaciones. La Answer Relevance, en cambio, depende sobre todo de la calidad del retrieval,
+que es idéntico en ambos sistemas — de ahí que la brecha sea más pequeña.
 
-- Comparación de Faithfulness entre ambos sistemas y su interpretación.
-- Tipo de errores detectados con mayor frecuencia por el Auditor.
-- Limitación identificada: la métrica de Faithfulness evalúa consistencia con el contexto
-  recuperado, no correspondencia con la realidad — si el fragmento correcto no está entre los
-  documentos recuperados, el sistema puede aprobar una respuesta consistente pero incorrecta.
-- Trabajo futuro: re-ranking de documentos recuperados, agente adicional de verificación
-  numérica para cifras y fechas.
+El Auditor intervino de forma activa: rechazó al menos un borrador en el 28 % de las consultas,
+y en 7 de esas 14 (el 14 % del total) el ciclo llegó al límite de 3 reintentos sin lograr una
+aprobación plena, forzando el avance a la etapa de redacción con el mejor borrador disponible.
+Las preguntas que más rechazos generaron fueron, de forma consistente, las que combinan una
+cifra contable puntual con una condición temporal exacta (por ejemplo, cargos por deterioro de
+activos, beneficios fiscales no reconocidos, o el número de opciones otorgadas bajo un plan de
+incentivos en un año fiscal específico) — el tipo de dato que es fácil de aproximar mal y que el
+Auditor está entrenado, vía prompt, para exigir con precisión.
+
+**Limitaciones observadas:**
+
+- La métrica de Faithfulness evalúa consistencia con el contexto recuperado, no
+  correspondencia con la realidad. Si el fragmento correcto no se encuentra entre los
+  documentos recuperados, el sistema puede aprobar una respuesta internamente consistente pero
+  factualmente incorrecta.
+- El costo de esta ganancia en fidelidad es tiempo de inferencia: cada rechazo del Auditor
+  implica una nueva llamada completa al Investigador, por lo que las consultas más complejas
+  (las que llegaron al límite de 3 reintentos) tardan sensiblemente más que el baseline Naive
+  RAG, que siempre resuelve en una sola llamada.
+- El 14 % de las consultas que agotó los reintentos sin aprobación plena sugiere que, para ese
+  subconjunto de preguntas, el problema no está en la redacción sino en la recuperación: el
+  contexto simplemente no contenía el dato exacto solicitado, y ningún número de reintentos de
+  redacción puede compensar una recuperación insuficiente.
+
+**Trabajo futuro:**
+
+- Incorporar re-ranking sobre los documentos recuperados antes de su uso por el Investigador,
+  para mejorar la precisión en el subconjunto de preguntas que agotan los reintentos.
+- Añadir un cuarto agente de verificación numérica, especializado en contrastar cifras y fechas
+  contra el texto fuente antes de que el Auditor evalúe la coherencia narrativa general.
+- Analizar si condicionar el número de reintentos al tipo de pregunta (más reintentos para
+  preguntas con múltiples condiciones cifradas) mejora la tasa de aprobación sin incrementar
+  el costo promedio en las preguntas más simples.
 
 ## 7. Ejecución
 
-1. Abrir `proyecto_multiagente_reasoning.ipynb` en un entorno con GPU (mínimo ~8 GB de VRAM
-   libre).
+1. Abrir `PROYECTO.ipynb` en un entorno con GPU (mínimo ~8 GB de VRAM libre).
 2. Ejecutar las celdas en orden. Se solicitará una clave de API de OpenAI, utilizada
-   exclusivamente por el juez de evaluación.
+   exclusivamente por el juez de evaluación (costo real de esta corrida: menor a $0.30).
 3. La Sección 14 despliega una interfaz interactiva (Gradio) para la demostración del sistema.
-
-Las imágenes y la tabla comparativa referenciadas en este documento (`diagrama_grafo.png`,
-`comparativa_metricas.png`, `tabla_comparativa.csv`) se generan automáticamente al ejecutar el
-notebook y quedan guardadas en la raíz del repositorio.
 
 ## 8. Estructura del repositorio
 
 ```
 ├── README.md
-├── proyecto_multiagente_reasoning.ipynb
+├── PROYECTO.ipynb
 ├── diagrama_grafo.png
 ├── comparativa_metricas.png
 ├── tabla_comparativa.csv
+├── resultados_multiagente.json
+├── resultados_naive.json
 └── link_repositorio.txt
 ```
